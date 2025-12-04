@@ -601,7 +601,7 @@ async def handle_call_tool(
             case "MyTopMusic":
                 logger.info(f"MyTopMusic called with arguments: {arguments}")
                 time_range = arguments.get("time_range", "short_term")
-                top_count = min(arguments.get("top_count", 10), 50)
+                top_count = min(int(arguments.get("top_count", 10)), 50)
                 create_playlist_flag = arguments.get("create_playlist", False)
 
                 period_labels = {
