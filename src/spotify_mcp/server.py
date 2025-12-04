@@ -38,6 +38,20 @@ spotify_client = spotify_api.Client(logger)
 
 server = Server("spotify-mcp")
 
+# Genre categories for PlaylistLibrarian
+GENRE_CATEGORIES = {
+    "🎸 Rock": ["rock", "metal", "punk", "grunge", "alternative", "indie rock", "hard rock"],
+    "🎵 Pop": ["pop", "dance pop", "electropop", "synth-pop", "indie pop"],
+    "🎤 Hip-Hop": ["hip hop", "rap", "trap", "southern hip hop", "gangster rap"],
+    "🎧 Electronic": ["electronic", "edm", "house", "techno", "dubstep", "trance", "drum and bass"],
+    "🎷 Jazz": ["jazz", "bebop", "swing", "smooth jazz", "jazz fusion"],
+    "🎻 Classical": ["classical", "orchestra", "symphony", "baroque", "opera"],
+    "🤠 Country": ["country", "americana", "folk", "bluegrass", "country rock"],
+    "🎺 R&B": ["r&b", "soul", "funk", "neo soul", "motown"],
+    "🌍 World": ["latin", "reggae", "afrobeat", "k-pop", "j-pop", "reggaeton", "bossa nova"],
+    "😴 Chill": ["ambient", "lo-fi", "chill", "downtempo", "chillwave"],
+}
+
 
 # options =
 class ToolModel(BaseModel):
@@ -103,6 +117,37 @@ class Playlist(ToolModel):
     public: Optional[bool] = Field(default=True, description="Whether the playlist should be public (for create action).")
 
 
+class ArtistDeepDive(ToolModel):
+    """Create a comprehensive playlist collection for any artist.
+    Generates three playlists:
+    - 'Best of [Artist]': Top 20 most popular tracks
+    - '[Artist]: Deep Cuts': Hidden gems with low popularity scores
+    - '[Artist]: Through the Years': Complete discography in chronological order
+    """
+    artist_name: str = Field(description="Name of the artist to analyze.")
+    include_singles: Optional[bool] = Field(default=True, description="Include singles and EPs, not just albums.")
+    deep_cuts_max_popularity: Optional[int] = Field(default=40, description="Maximum popularity score (0-100) for deep cuts. Lower = more obscure.")
+
+
+class PlaylistLibrarian(ToolModel):
+    """Auto-organize playlists by genre with emoji category prefixes.
+    Analyzes tracks in each playlist, detects dominant genres, and optionally
+    renames playlists with category prefixes like '🎸 Rock/My Playlist'.
+    """
+    dry_run: Optional[bool] = Field(default=True, description="If true, only show proposed changes without applying them.")
+    category_style: Optional[str] = Field(default="emoji", description="Style for category prefix: 'emoji' (🎸 Rock/) or 'text' ([Rock])")
+
+
+class MyTopMusic(ToolModel):
+    """Get your personalized listening statistics and top music.
+    Shows your most played tracks and artists for different time periods,
+    with genre breakdown and optional playlist creation.
+    """
+    time_range: Optional[str] = Field(default="short_term", description="Time period: 'short_term' (4 weeks), 'medium_term' (6 months), or 'long_term' (all time)")
+    top_count: Optional[int] = Field(default=10, description="Number of top items to return (max 50)")
+    create_playlist: Optional[bool] = Field(default=False, description="Create a playlist from your top tracks")
+
+
 @server.list_prompts()
 async def handle_list_prompts() -> list[types.Prompt]:
     return []
@@ -117,13 +162,15 @@ async def handle_list_resources() -> list[types.Resource]:
 async def handle_list_tools() -> list[types.Tool]:
     """List available tools."""
     logger.info("Listing available tools")
-    # await server.request_context.session.send_notification("are you recieving this notification?")
     tools = [
         Playback.as_tool(),
         Search.as_tool(),
         Queue.as_tool(),
         GetInfo.as_tool(),
         Playlist.as_tool(),
+        ArtistDeepDive.as_tool(),
+        PlaylistLibrarian.as_tool(),
+        MyTopMusic.as_tool(),
     ]
     logger.info(f"Available tools: {[tool.name for tool in tools]}")
     return tools
@@ -352,6 +399,300 @@ async def handle_call_tool(
                             text=f"Unknown playlist action: {action}."
                                  "Supported actions are: get, get_tracks, add_tracks, remove_tracks, change_details, create."
                         )]
+            case "ArtistDeepDive":
+                logger.info(f"ArtistDeepDive called with arguments: {arguments}")
+                artist_name = arguments.get("artist_name")
+                include_singles = arguments.get("include_singles", True)
+                deep_cuts_threshold = arguments.get("deep_cuts_max_popularity", 40)
+
+                # 1. Search for artist
+                search_results = spotify_client.search(artist_name, qtype="artist", limit=1)
+                if not search_results.get('artists'):
+                    return [types.TextContent(type="text", text=f"Artist '{artist_name}' not found.")]
+
+                artist = search_results['artists'][0]
+                artist_id = artist['id']
+                artist_display_name = artist['name']
+                logger.info(f"Found artist: {artist_display_name} (ID: {artist_id})")
+
+                # 2. Get all albums
+                albums = spotify_client.get_artist_albums(artist_id, include_singles=include_singles)
+                logger.info(f"Found {len(albums)} albums/singles for {artist_display_name}")
+
+                # 3. Collect all tracks with metadata
+                all_tracks = []
+                for album in albums:
+                    try:
+                        tracks, release_date, album_type = spotify_client.get_album_tracks_full(album['id'])
+                        for track in tracks:
+                            full_track = spotify_client.get_track(track['id'])
+                            all_tracks.append({
+                                'id': track['id'],
+                                'name': track['name'],
+                                'popularity': full_track.get('popularity', 0),
+                                'release_date': release_date,
+                                'album_type': album_type,
+                                'album_name': album['name']
+                            })
+                    except Exception as e:
+                        logger.error(f"Error processing album {album.get('name')}: {str(e)}")
+                        continue
+
+                logger.info(f"Collected {len(all_tracks)} total tracks")
+
+                # 4. Deduplicate by track name (keep highest popularity version)
+                seen = {}
+                for track in all_tracks:
+                    key = track['name'].lower()
+                    if key not in seen or track['popularity'] > seen[key]['popularity']:
+                        seen[key] = track
+                unique_tracks = list(seen.values())
+                logger.info(f"After deduplication: {len(unique_tracks)} unique tracks")
+
+                # 5. Create "Best of" playlist
+                best_of_tracks = sorted(unique_tracks, key=lambda x: x['popularity'], reverse=True)[:20]
+                best_of_ids = set(t['id'] for t in best_of_tracks)
+                best_of_playlist = spotify_client.create_playlist(
+                    name=f"Best of {artist_display_name}",
+                    description=f"Top 20 most popular tracks by {artist_display_name}"
+                )
+                if best_of_tracks:
+                    spotify_client.add_tracks_to_playlist(best_of_playlist['id'], [t['id'] for t in best_of_tracks])
+
+                # 6. Create "Deep Cuts" playlist
+                deep_cuts = [t for t in unique_tracks
+                             if t['popularity'] < deep_cuts_threshold
+                             and t['id'] not in best_of_ids
+                             and t['album_type'] == 'album']
+                deep_cuts = sorted(deep_cuts, key=lambda x: x['popularity'])[:25]
+                deep_cuts_playlist = spotify_client.create_playlist(
+                    name=f"{artist_display_name}: Deep Cuts",
+                    description=f"Hidden gems and lesser-known tracks by {artist_display_name}"
+                )
+                if deep_cuts:
+                    spotify_client.add_tracks_to_playlist(deep_cuts_playlist['id'], [t['id'] for t in deep_cuts])
+
+                # 7. Create "Through the Years" playlist
+                chronological = sorted(unique_tracks, key=lambda x: x['release_date'])
+                chrono_playlist = spotify_client.create_playlist(
+                    name=f"{artist_display_name}: Through the Years",
+                    description=f"Complete discography of {artist_display_name} in chronological order"
+                )
+                if chronological:
+                    track_ids = [t['id'] for t in chronological]
+                    for i in range(0, len(track_ids), 100):
+                        spotify_client.add_tracks_to_playlist(chrono_playlist['id'], track_ids[i:i+100])
+
+                result = {
+                    "artist": {"name": artist_display_name, "id": artist_id},
+                    "playlists_created": [
+                        {"name": best_of_playlist['name'], "id": best_of_playlist['id'], "track_count": len(best_of_tracks)},
+                        {"name": deep_cuts_playlist['name'], "id": deep_cuts_playlist['id'], "track_count": len(deep_cuts)},
+                        {"name": chrono_playlist['name'], "id": chrono_playlist['id'], "track_count": len(chronological)}
+                    ],
+                    "stats": {
+                        "total_albums_analyzed": len(albums),
+                        "total_tracks_analyzed": len(unique_tracks)
+                    }
+                }
+                return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+            case "PlaylistLibrarian":
+                logger.info(f"PlaylistLibrarian called with arguments: {arguments}")
+                dry_run = arguments.get("dry_run", True)
+                style = arguments.get("category_style", "emoji")
+
+                # 1. Get all user-owned playlists
+                all_playlists = spotify_client.get_all_playlists()
+                user_id = spotify_client.sp.current_user()['id']
+                owned = [p for p in all_playlists if p['owner']['id'] == user_id]
+                logger.info(f"Found {len(owned)} user-owned playlists")
+
+                changes = []
+                category_counts = {cat: 0 for cat in GENRE_CATEGORIES}
+                skipped = 0
+
+                for playlist in owned:
+                    name = playlist['name']
+
+                    # Skip if already categorized
+                    if any(name.startswith(cat) for cat in GENRE_CATEGORIES):
+                        skipped += 1
+                        continue
+
+                    # 2. Sample tracks from playlist
+                    try:
+                        tracks = spotify_client.get_playlist_tracks(playlist['id'])[:30]
+                    except Exception as e:
+                        logger.error(f"Error getting tracks for playlist '{name}': {str(e)}")
+                        skipped += 1
+                        continue
+
+                    if not tracks:
+                        skipped += 1
+                        continue
+
+                    track_ids = [t['id'] for t in tracks if t and t.get('id')]
+                    if not track_ids:
+                        skipped += 1
+                        continue
+
+                    # 3. Get artists and their genres
+                    try:
+                        artist_ids = spotify_client.get_artists_for_tracks(track_ids)
+                        if not artist_ids:
+                            skipped += 1
+                            continue
+
+                        artist_genres = spotify_client.get_artists_genres(artist_ids)
+                    except Exception as e:
+                        logger.error(f"Error getting genres for playlist '{name}': {str(e)}")
+                        skipped += 1
+                        continue
+
+                    # 4. Score genres
+                    all_genres = []
+                    for genres in artist_genres.values():
+                        all_genres.extend(genres)
+
+                    best_category = None
+                    best_score = 0
+                    for category, keywords in GENRE_CATEGORIES.items():
+                        score = sum(1 for g in all_genres if any(kw in g.lower() for kw in keywords))
+                        if score > best_score:
+                            best_score = score
+                            best_category = category
+
+                    if best_category and best_score > 0:
+                        if style == "emoji":
+                            new_name = f"{best_category}/{name}"
+                        else:
+                            text_cat = best_category.split()[1]
+                            new_name = f"[{text_cat}] {name}"
+
+                        changes.append({
+                            "playlist_id": playlist['id'],
+                            "original_name": name,
+                            "new_name": new_name,
+                            "detected_category": best_category,
+                            "applied": not dry_run
+                        })
+                        category_counts[best_category] += 1
+
+                        if not dry_run:
+                            try:
+                                spotify_client.change_playlist_details(playlist['id'], name=new_name)
+                            except Exception as e:
+                                logger.error(f"Error renaming playlist '{name}': {str(e)}")
+                                changes[-1]["applied"] = False
+                    else:
+                        skipped += 1
+
+                result = {
+                    "playlists_analyzed": len(owned),
+                    "playlists_categorized": len(changes),
+                    "playlists_skipped": skipped,
+                    "dry_run": dry_run,
+                    "changes": changes,
+                    "category_summary": {k: v for k, v in category_counts.items() if v > 0}
+                }
+                return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+            case "MyTopMusic":
+                logger.info(f"MyTopMusic called with arguments: {arguments}")
+                time_range = arguments.get("time_range", "short_term")
+                top_count = min(arguments.get("top_count", 10), 50)
+                create_playlist_flag = arguments.get("create_playlist", False)
+
+                period_labels = {
+                    "short_term": "Last 4 Weeks",
+                    "medium_term": "Last 6 Months",
+                    "long_term": "All Time"
+                }
+
+                if time_range not in period_labels:
+                    return [types.TextContent(
+                        type="text",
+                        text=f"Invalid time_range: {time_range}. Must be 'short_term', 'medium_term', or 'long_term'."
+                    )]
+
+                # 1. Fetch data
+                top_tracks = spotify_client.get_top_tracks(time_range, limit=50)
+                top_artists = spotify_client.get_top_artists(time_range, limit=50)
+                logger.info(f"Fetched {len(top_tracks)} top tracks, {len(top_artists)} top artists")
+
+                # 2. Process top tracks
+                top_tracks_display = []
+                total_duration_ms = 0
+                for i, track in enumerate(top_tracks[:top_count]):
+                    total_duration_ms += track.get('duration_ms', 0)
+                    top_tracks_display.append({
+                        "rank": i + 1,
+                        "name": track['name'],
+                        "artist": track['artists'][0]['name'],
+                        "id": track['id']
+                    })
+
+                # 3. Process top artists with genres
+                top_artists_display = []
+                all_genres = []
+                for i, artist in enumerate(top_artists[:top_count]):
+                    genres = artist.get('genres', [])
+                    all_genres.extend(genres)
+                    top_artists_display.append({
+                        "rank": i + 1,
+                        "name": artist['name'],
+                        "genres": genres[:3]
+                    })
+
+                # 4. Calculate genre breakdown
+                genre_counts = {}
+                for genre in all_genres:
+                    simple = genre.split()[0] if genre else "other"
+                    genre_counts[simple] = genre_counts.get(simple, 0) + 1
+
+                total_genres = sum(genre_counts.values()) or 1
+                genre_breakdown = {
+                    g: round(c / total_genres * 100)
+                    for g, c in sorted(genre_counts.items(), key=lambda x: -x[1])[:5]
+                }
+
+                # 5. Stats
+                stats = {
+                    "top_tracks_analyzed": len(top_tracks),
+                    "top_artists_analyzed": len(top_artists),
+                    "estimated_top_tracks_duration_hours": round(total_duration_ms / 3600000, 1)
+                }
+
+                # 6. Optional playlist creation
+                recap_playlist = None
+                if create_playlist_flag and top_tracks:
+                    month_year = datetime.now().strftime("%b %Y")
+                    playlist = spotify_client.create_playlist(
+                        name=f"My Top Tracks - {month_year}",
+                        description=f"Your top tracks for {period_labels[time_range]}"
+                    )
+                    track_ids = [t['id'] for t in top_tracks[:top_count]]
+                    spotify_client.add_tracks_to_playlist(playlist['id'], track_ids)
+                    recap_playlist = {
+                        "name": playlist['name'],
+                        "id": playlist['id'],
+                        "track_count": len(track_ids)
+                    }
+
+                result = {
+                    "time_range": time_range,
+                    "period_label": period_labels[time_range],
+                    "top_tracks": top_tracks_display,
+                    "top_artists": top_artists_display,
+                    "genre_breakdown": genre_breakdown,
+                    "stats": stats
+                }
+                if recap_playlist:
+                    result["recap_playlist"] = recap_playlist
+
+                return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
             case _:
                 error_msg = f"Unknown tool: {name}"
                 logger.error(error_msg)

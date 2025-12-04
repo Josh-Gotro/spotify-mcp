@@ -373,3 +373,83 @@ class Client:
 
     def set_volume(self, volume_percent):
         self.sp.volume(volume_percent)
+
+    # --- Methods for advanced features ---
+
+    def get_track(self, track_id: str) -> Dict:
+        """Get full track details including popularity."""
+        if track_id.startswith('spotify:track:'):
+            track_id = track_id.split(':')[2]
+        return self.sp.track(track_id)
+
+    def get_artist_albums(self, artist_id: str, include_singles: bool = True, limit: int = 50) -> List[Dict]:
+        """Get all albums for an artist with pagination."""
+        album_type = 'album,single' if include_singles else 'album'
+        all_albums = []
+        offset = 0
+        while True:
+            results = self.sp.artist_albums(artist_id, album_type=album_type, limit=limit, offset=offset)
+            all_albums.extend(results['items'])
+            if not results['next']:
+                break
+            offset += limit
+        return all_albums
+
+    def get_album_tracks_full(self, album_id: str) -> tuple:
+        """Get all tracks from an album with release date and album type."""
+        album = self.sp.album(album_id)
+        return album['tracks']['items'], album['release_date'], album['album_type']
+
+    def get_artist_top_tracks(self, artist_id: str, country: str = 'US') -> List[Dict]:
+        """Get artist's top tracks."""
+        results = self.sp.artist_top_tracks(artist_id, country=country)
+        return results['tracks']
+
+    def get_all_playlists(self, limit: int = 50) -> List[Dict]:
+        """Get all user playlists with pagination."""
+        playlists = []
+        offset = 0
+        while True:
+            results = self.sp.current_user_playlists(limit=limit, offset=offset)
+            playlists.extend(results['items'])
+            if not results['next']:
+                break
+            offset += limit
+        return playlists
+
+    def get_artists_for_tracks(self, track_ids: List[str]) -> List[str]:
+        """Get unique artist IDs for multiple tracks (batch request)."""
+        artist_ids = set()
+        for i in range(0, len(track_ids), 50):
+            batch = track_ids[i:i+50]
+            tracks = self.sp.tracks(batch)['tracks']
+            for t in tracks:
+                if t and t.get('artists'):
+                    artist_ids.add(t['artists'][0]['id'])
+        return list(artist_ids)
+
+    def get_artists_genres(self, artist_ids: List[str]) -> Dict[str, List[str]]:
+        """Get genres for multiple artists (batch request)."""
+        genres = {}
+        for i in range(0, len(artist_ids), 50):
+            batch = artist_ids[i:i+50]
+            results = self.sp.artists(batch)['artists']
+            for artist in results:
+                if artist:
+                    genres[artist['id']] = artist.get('genres', [])
+        return genres
+
+    def get_top_tracks(self, time_range: str = 'short_term', limit: int = 50) -> List[Dict]:
+        """Get user's top tracks for time period."""
+        results = self.sp.current_user_top_tracks(time_range=time_range, limit=limit)
+        return results['items']
+
+    def get_top_artists(self, time_range: str = 'short_term', limit: int = 50) -> List[Dict]:
+        """Get user's top artists for time period."""
+        results = self.sp.current_user_top_artists(time_range=time_range, limit=limit)
+        return results['items']
+
+    def get_recently_played(self, limit: int = 50) -> List[Dict]:
+        """Get recently played tracks."""
+        results = self.sp.current_user_recently_played(limit=limit)
+        return results['items']
