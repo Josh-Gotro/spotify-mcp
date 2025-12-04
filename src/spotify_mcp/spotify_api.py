@@ -8,12 +8,14 @@ from spotipy.cache_handler import CacheFileHandler
 from spotipy.oauth2 import SpotifyOAuth
 
 from . import utils
+from .remote_cache_handler import RemoteCacheHandler
 
 load_dotenv()
 
 CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
 CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("SPOTIFY_REDIRECT_URI")
+BACKEND_URL = os.getenv("SPOTIFY_BACKEND_URL")
 
 # Normalize the redirect URI to meet Spotify's requirements
 if REDIRECT_URI:
@@ -36,14 +38,24 @@ class Client:
         scope = "user-library-read,user-read-playback-state,user-modify-playback-state,user-read-currently-playing,playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public"
 
         try:
+            # Use remote cache handler if backend URL is configured, otherwise use local file cache
+            if BACKEND_URL:
+                self.logger.info(f"Using remote cache handler with backend: {BACKEND_URL}")
+                cache_handler = RemoteCacheHandler(backend_url=BACKEND_URL)
+            else:
+                self.logger.info("Using local file cache handler")
+                cache_handler = CacheFileHandler()
+
             self.sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
                 scope=scope,
                 client_id=CLIENT_ID,
                 client_secret=CLIENT_SECRET,
-                redirect_uri=REDIRECT_URI))
+                redirect_uri=REDIRECT_URI,
+                cache_handler=cache_handler,
+                open_browser=False))  # Don't open browser - we use web auth
 
             self.auth_manager: SpotifyOAuth = self.sp.auth_manager
-            self.cache_handler: CacheFileHandler = self.auth_manager.cache_handler
+            self.cache_handler = cache_handler
         except Exception as e:
             self.logger.error(f"Failed to initialize Spotify client: {str(e)}")
             raise

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv --version:*)",
+      "Bash(powershell -Command \"irm https://astral.sh/uv/install.ps1 | iex\")",
+      "Bash($env:PATH = \"$env:USERPROFILE\\.local\\bin;$env:PATH\")",
+      "Bash(C:Usersbeeft.localbinuv.exe --version)",
+      "Bash(powershell -Command:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
