@@ -148,6 +148,17 @@ class MyTopMusic(ToolModel):
     create_playlist: Optional[bool] = Field(default=False, description="Create a playlist from your top tracks")
 
 
+class Discover(ToolModel):
+    """Get personalized music recommendations based on an artist, track, or your listening history.
+    Uses genre-matching and your top artists to find new music you'll like - without deprecated APIs.
+    """
+    seed_type: str = Field(description="Type of seed: 'artist', 'track', or 'listening_history'")
+    seed_value: Optional[str] = Field(default=None, description="Artist name or track URI (required for 'artist' and 'track' seed types)")
+    year_range: Optional[str] = Field(default="2015-2025", description="Year range for recommendations (e.g., '2020-2025')")
+    limit: Optional[int] = Field(default=30, description="Number of recommendations to return (max 50)")
+    create_playlist: Optional[bool] = Field(default=False, description="Create a playlist from recommendations")
+
+
 @server.list_prompts()
 async def handle_list_prompts() -> list[types.Prompt]:
     return []
@@ -171,6 +182,7 @@ async def handle_list_tools() -> list[types.Tool]:
         ArtistDeepDive.as_tool(),
         PlaylistLibrarian.as_tool(),
         MyTopMusic.as_tool(),
+        Discover.as_tool(),
     ]
     logger.info(f"Available tools: {[tool.name for tool in tools]}")
     return tools
@@ -690,6 +702,190 @@ async def handle_call_tool(
                 }
                 if recap_playlist:
                     result["recap_playlist"] = recap_playlist
+
+                return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+            case "Discover":
+                logger.info(f"Discover called with arguments: {arguments}")
+                seed_type = arguments.get("seed_type")
+                seed_value = arguments.get("seed_value")
+                year_range = arguments.get("year_range", "2015-2025")
+                limit = min(arguments.get("limit", 30), 50)
+                create_playlist_flag = arguments.get("create_playlist", False)
+
+                # Validate inputs
+                if seed_type not in ["artist", "track", "listening_history"]:
+                    return [types.TextContent(
+                        type="text",
+                        text=f"Invalid seed_type: {seed_type}. Must be 'artist', 'track', or 'listening_history'."
+                    )]
+
+                if seed_type in ["artist", "track"] and not seed_value:
+                    return [types.TextContent(
+                        type="text",
+                        text=f"seed_value is required for seed_type '{seed_type}'."
+                    )]
+
+                # Step 1: Get seed genres
+                seed_genres = []
+                seed_artist_name = None
+                seed_popularity = 50  # Default middle-range
+
+                if seed_type == "artist":
+                    # Search for the artist
+                    search_results = spotify_client.search(seed_value, qtype="artist", limit=1)
+                    if not search_results.get('artists'):
+                        return [types.TextContent(type="text", text=f"Artist '{seed_value}' not found.")]
+                    artist = search_results['artists'][0]
+                    artist_details = spotify_client.get_artist(artist['id'])
+                    seed_genres = artist_details.get('genres', [])[:3]
+                    seed_artist_name = artist['name']
+                    logger.info(f"Seed artist: {seed_artist_name}, genres: {seed_genres}")
+
+                elif seed_type == "track":
+                    # Get track and its primary artist's genres
+                    track_id = seed_value.split(':')[-1] if ':' in seed_value else seed_value
+                    track = spotify_client.get_track(track_id)
+                    seed_popularity = track.get('popularity', 50)
+                    if track.get('artists'):
+                        artist_id = track['artists'][0]['id']
+                        artist_details = spotify_client.get_artist(artist_id)
+                        seed_genres = artist_details.get('genres', [])[:3]
+                        seed_artist_name = artist_details['name']
+                    logger.info(f"Seed track by {seed_artist_name}, popularity: {seed_popularity}, genres: {seed_genres}")
+
+                elif seed_type == "listening_history":
+                    # Get genres from user's top artists
+                    top_artists = spotify_client.get_top_artists(time_range="medium_term", limit=10)
+                    genre_counts = {}
+                    for artist in top_artists:
+                        for genre in artist.get('genres', []):
+                            genre_counts[genre] = genre_counts.get(genre, 0) + 1
+                    # Get top 3 genres
+                    seed_genres = sorted(genre_counts.keys(), key=lambda g: -genre_counts[g])[:3]
+                    logger.info(f"Seed genres from listening history: {seed_genres}")
+
+                if not seed_genres:
+                    return [types.TextContent(
+                        type="text",
+                        text="Could not determine genres for recommendations. Try a different seed."
+                    )]
+
+                # Step 2: Get tracks to exclude (recent + saved)
+                exclude_ids = set()
+                try:
+                    exclude_ids.update(spotify_client.get_recent_track_ids(limit=50))
+                    exclude_ids.update(spotify_client.get_user_saved_track_ids(limit=100))
+                except Exception as e:
+                    logger.error(f"Error getting tracks to exclude: {str(e)}")
+
+                # Step 3: Search for tracks by genre
+                recommendations = []
+                seen_track_ids = set()
+                artist_track_counts = {}  # Track how many songs per artist
+
+                for genre in seed_genres:
+                    try:
+                        tracks = spotify_client.search_by_genre(genre, year_range=year_range, limit=20)
+                        for track in tracks:
+                            track_id = track['id']
+                            if track_id in seen_track_ids or track_id in exclude_ids:
+                                continue
+
+                            # Limit tracks per artist for diversity
+                            artist_id = track['artists'][0]['id'] if track.get('artists') else None
+                            if artist_id and artist_track_counts.get(artist_id, 0) >= 3:
+                                continue
+
+                            seen_track_ids.add(track_id)
+                            if artist_id:
+                                artist_track_counts[artist_id] = artist_track_counts.get(artist_id, 0) + 1
+
+                            recommendations.append({
+                                'id': track_id,
+                                'name': track['name'],
+                                'artist': track['artists'][0]['name'] if track.get('artists') else 'Unknown',
+                                'artist_id': artist_id,
+                                'popularity': track.get('popularity', 0),
+                                'source_genre': genre
+                            })
+                    except Exception as e:
+                        logger.error(f"Error searching genre '{genre}': {str(e)}")
+                        continue
+
+                # Step 4: Add top tracks from user's similar artists
+                if seed_type in ["artist", "track"]:
+                    try:
+                        top_artists = spotify_client.get_top_artists(time_range="medium_term", limit=20)
+                        matching_artists = []
+                        for artist in top_artists:
+                            artist_genres = set(artist.get('genres', []))
+                            if artist_genres.intersection(seed_genres):
+                                matching_artists.append(artist)
+
+                        for artist in matching_artists[:5]:
+                            try:
+                                top_tracks = spotify_client.get_artist_top_tracks(artist['id'])
+                                for track in top_tracks[:3]:
+                                    track_id = track['id']
+                                    if track_id in seen_track_ids or track_id in exclude_ids:
+                                        continue
+                                    seen_track_ids.add(track_id)
+                                    recommendations.append({
+                                        'id': track_id,
+                                        'name': track['name'],
+                                        'artist': artist['name'],
+                                        'artist_id': artist['id'],
+                                        'popularity': track.get('popularity', 0),
+                                        'source_genre': 'top_artist_match'
+                                    })
+                            except Exception as e:
+                                logger.error(f"Error getting top tracks for {artist['name']}: {str(e)}")
+                                continue
+                    except Exception as e:
+                        logger.error(f"Error getting matching top artists: {str(e)}")
+
+                # Step 5: Sort by popularity proximity to seed and diversify
+                def score_track(t):
+                    pop_diff = abs(t['popularity'] - seed_popularity)
+                    return pop_diff
+
+                recommendations.sort(key=score_track)
+                recommendations = recommendations[:limit]
+
+                logger.info(f"Generated {len(recommendations)} recommendations")
+
+                # Step 6: Optional playlist creation
+                discover_playlist = None
+                if create_playlist_flag and recommendations:
+                    playlist_name = f"Discover: {seed_artist_name or 'My Genres'}"
+                    playlist = spotify_client.create_playlist(
+                        name=playlist_name,
+                        description=f"Recommendations based on {seed_type}: {seed_value or 'listening history'}"
+                    )
+                    track_ids = [t['id'] for t in recommendations]
+                    spotify_client.add_tracks_to_playlist(playlist['id'], track_ids)
+                    discover_playlist = {
+                        "name": playlist['name'],
+                        "id": playlist['id'],
+                        "track_count": len(track_ids)
+                    }
+
+                result = {
+                    "seed_type": seed_type,
+                    "seed_value": seed_value or "listening_history",
+                    "seed_genres": seed_genres,
+                    "year_range": year_range,
+                    "recommendations": [{
+                        "name": t['name'],
+                        "artist": t['artist'],
+                        "id": t['id'],
+                        "popularity": t['popularity']
+                    } for t in recommendations],
+                    "count": len(recommendations)
+                }
+                if discover_playlist:
+                    result["playlist_created"] = discover_playlist
 
                 return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
 

@@ -12,7 +12,13 @@
       "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" log --oneline -5)",
       "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" diff src/spotify_mcp/)",
       "WebSearch",
-      "WebFetch(domain:developer.spotify.com)"
+      "WebFetch(domain:developer.spotify.com)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" branch -a)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" worktree list)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" worktree prune:*)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" branch:*)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" worktree remove:*)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" branch -D recursing-poincare)"
     ],
     "deny": [],
     "ask": []

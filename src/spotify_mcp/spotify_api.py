@@ -453,3 +453,39 @@ class Client:
         """Get recently played tracks."""
         results = self.sp.current_user_recently_played(limit=limit)
         return results['items']
+
+    def search_by_genre(self, genre: str, year_range: str = "2015-2025", limit: int = 20) -> List[Dict]:
+        """Search for tracks by genre with optional year filter."""
+        query = f'genre:"{genre}" year:{year_range}'
+        results = self.sp.search(q=query, type='track', limit=limit)
+        return results.get('tracks', {}).get('items', [])
+
+    def get_artist(self, artist_id: str) -> Dict:
+        """Get artist details including genres."""
+        if artist_id.startswith('spotify:artist:'):
+            artist_id = artist_id.split(':')[2]
+        return self.sp.artist(artist_id)
+
+    def get_user_saved_track_ids(self, limit: int = 100) -> set:
+        """Get IDs of user's saved/liked tracks for deduplication."""
+        track_ids = set()
+        offset = 0
+        while len(track_ids) < limit:
+            results = self.sp.current_user_saved_tracks(limit=50, offset=offset)
+            items = results.get('items', [])
+            if not items:
+                break
+            for item in items:
+                if item and item.get('track'):
+                    track_ids.add(item['track']['id'])
+            offset += 50
+        return track_ids
+
+    def get_recent_track_ids(self, limit: int = 50) -> set:
+        """Get IDs of recently played tracks for deduplication."""
+        track_ids = set()
+        results = self.sp.current_user_recently_played(limit=limit)
+        for item in results.get('items', []):
+            if item and item.get('track'):
+                track_ids.add(item['track']['id'])
+        return track_ids
