@@ -18,7 +18,17 @@
       "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" worktree prune:*)",
       "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" branch:*)",
       "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" worktree remove:*)",
-      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" branch -D recursing-poincare)"
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" branch -D recursing-poincare)",
+      "WebFetch(domain:medium.com)",
+      "WebFetch(domain:community.openai.com)",
+      "Bash(claude mcp add-json:*)",
+      "Bash(claude mcp add --help:*)",
+      "Bash(claude mcp add --scope user --transport stdio -e SPOTIFY_CLIENT_ID=c694c1ae79724f1aa39ff2127dbc82bd -e SPOTIFY_CLIENT_SECRET=0bf9f97038f045108302acfbb6d47925 -e SPOTIFY_REDIRECT_URI=https://www.joshgotro.com/spotify/callback -e SPOTIFY_BACKEND_URL=https://gentle-mesa-48529-28750f66374b.herokuapp.com spotify -- cmd /c \"C:\\Users\\beeft\\.local\\bin\\uv.exe\" --directory \"C:\\Development\\gotro\\spotify-mcp\" run spotify-mcp)",
+      "Bash(claude mcp add --scope user --transport stdio spotify cmd /c \"C:\\Users\\beeft\\.local\\bin\\uv.exe --directory C:\\Development\\gotro\\spotify-mcp run spotify-mcp\" -e SPOTIFY_CLIENT_ID=c694c1ae79724f1aa39ff2127dbc82bd -e SPOTIFY_CLIENT_SECRET=0bf9f97038f045108302acfbb6d47925 -e SPOTIFY_REDIRECT_URI=https://www.joshgotro.com/spotify/callback -e SPOTIFY_BACKEND_URL=https://gentle-mesa-48529-28750f66374b.herokuapp.com)",
+      "Bash(claude mcp get:*)",
+      "Bash(claude mcp remove:*)",
+      "Bash(claude mcp list:*)",
+      "mcp__spotify__SpotifyPlayback"
     ],
     "deny": [],
     "ask": []

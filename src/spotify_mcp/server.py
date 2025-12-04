@@ -159,6 +159,16 @@ class Discover(ToolModel):
     create_playlist: Optional[bool] = Field(default=False, description="Create a playlist from recommendations")
 
 
+class Library(ToolModel):
+    """Manage user's Liked Songs library.
+    - save: Save tracks to Liked Songs.
+    - remove: Remove tracks from Liked Songs.
+    - check: Check if tracks are in Liked Songs.
+    """
+    action: str = Field(description="Action to perform: 'save', 'remove', or 'check'.")
+    track_ids: List[str] = Field(description="List of track IDs to save/remove/check.")
+
+
 @server.list_prompts()
 async def handle_list_prompts() -> list[types.Prompt]:
     return []
@@ -179,6 +189,7 @@ async def handle_list_tools() -> list[types.Tool]:
         Queue.as_tool(),
         GetInfo.as_tool(),
         Playlist.as_tool(),
+        Library.as_tool(),
         ArtistDeepDive.as_tool(),
         PlaylistLibrarian.as_tool(),
         MyTopMusic.as_tool(),
@@ -411,6 +422,53 @@ async def handle_call_tool(
                             text=f"Unknown playlist action: {action}."
                                  "Supported actions are: get, get_tracks, add_tracks, remove_tracks, change_details, create."
                         )]
+
+            case "Library":
+                logger.info(f"Library operation with arguments: {arguments}")
+                action = arguments.get("action")
+                track_ids = arguments.get("track_ids", [])
+
+                if isinstance(track_ids, str):
+                    try:
+                        track_ids = json.loads(track_ids)
+                    except json.JSONDecodeError:
+                        return [types.TextContent(
+                            type="text",
+                            text="Error: track_ids must be a list or a valid JSON array."
+                        )]
+
+                if not track_ids:
+                    return [types.TextContent(
+                        type="text",
+                        text="Error: track_ids is required."
+                    )]
+
+                match action:
+                    case "save":
+                        spotify_client.save_tracks(track_ids)
+                        return [types.TextContent(
+                            type="text",
+                            text=f"Saved {len(track_ids)} track(s) to Liked Songs."
+                        )]
+                    case "remove":
+                        spotify_client.remove_saved_tracks(track_ids)
+                        return [types.TextContent(
+                            type="text",
+                            text=f"Removed {len(track_ids)} track(s) from Liked Songs."
+                        )]
+                    case "check":
+                        results = spotify_client.check_saved_tracks(track_ids)
+                        check_results = [{"track_id": tid, "is_saved": saved} for tid, saved in zip(track_ids, results)]
+                        return [types.TextContent(
+                            type="text",
+                            text=json.dumps(check_results, indent=2)
+                        )]
+                    case _:
+                        return [types.TextContent(
+                            type="text",
+                            text=f"Unknown library action: {action}. Supported actions are: save, remove, check."
+                        )]
+
             case "ArtistDeepDive":
                 logger.info(f"ArtistDeepDive called with arguments: {arguments}")
                 artist_name = arguments.get("artist_name")

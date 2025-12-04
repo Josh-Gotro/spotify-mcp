@@ -35,7 +35,7 @@ class Client:
         """Initialize Spotify client with necessary permissions"""
         self.logger = logger
 
-        scope = "user-library-read,user-read-playback-state,user-modify-playback-state,user-read-currently-playing,playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public"
+        scope = "user-library-read,user-library-modify,user-read-playback-state,user-modify-playback-state,user-read-currently-playing,playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public"
 
         try:
             # Use remote cache handler if backend URL is configured, otherwise use local file cache
@@ -489,3 +489,32 @@ class Client:
             if item and item.get('track'):
                 track_ids.add(item['track']['id'])
         return track_ids
+
+    def save_tracks(self, track_ids: List[str]):
+        """Save tracks to user's library (Liked Songs)."""
+        if not track_ids:
+            raise ValueError("No track IDs provided.")
+        # Spotify API accepts up to 50 tracks per request
+        for i in range(0, len(track_ids), 50):
+            batch = track_ids[i:i+50]
+            self.sp.current_user_saved_tracks_add(tracks=batch)
+        self.logger.info(f"Saved {len(track_ids)} track(s) to library")
+
+    def remove_saved_tracks(self, track_ids: List[str]):
+        """Remove tracks from user's library (Liked Songs)."""
+        if not track_ids:
+            raise ValueError("No track IDs provided.")
+        for i in range(0, len(track_ids), 50):
+            batch = track_ids[i:i+50]
+            self.sp.current_user_saved_tracks_delete(tracks=batch)
+        self.logger.info(f"Removed {len(track_ids)} track(s) from library")
+
+    def check_saved_tracks(self, track_ids: List[str]) -> List[bool]:
+        """Check if tracks are saved in user's library."""
+        if not track_ids:
+            return []
+        results = []
+        for i in range(0, len(track_ids), 50):
+            batch = track_ids[i:i+50]
+            results.extend(self.sp.current_user_saved_tracks_contains(tracks=batch))
+        return results
