@@ -5,7 +5,14 @@
       "Bash(powershell -Command \"irm https://astral.sh/uv/install.ps1 | iex\")",
       "Bash($env:PATH = \"$env:USERPROFILE\\.local\\bin;$env:PATH\")",
       "Bash(C:Usersbeeft.localbinuv.exe --version)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(cmd /c \"cd C:\\Development\\gotro\\gotrodb && git status\")",
+      "Bash(git -C \"C:\\Development\\gotro\\gotrodb\" status)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" diff src/spotify_mcp/server.py src/spotify_mcp/spotify_api.py)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" log --oneline -5)",
+      "Bash(git -C \"C:\\Development\\gotro\\spotify-mcp\" diff src/spotify_mcp/)",
+      "WebSearch",
+      "WebFetch(domain:developer.spotify.com)"
     ],
     "deny": [],
     "ask": []
