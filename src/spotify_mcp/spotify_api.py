@@ -21,13 +21,27 @@ BACKEND_URL = os.getenv("SPOTIFY_BACKEND_URL")
 if REDIRECT_URI:
     REDIRECT_URI = utils.normalize_redirect_uri(REDIRECT_URI)
 
-SCOPES = ["user-read-currently-playing", "user-read-playback-state", "user-read-currently-playing",  # spotify connect
-          "app-remote-control", "streaming",  # playback
-          "playlist-read-private", "playlist-read-collaborative", "playlist-modify-private", "playlist-modify-public",
-          # playlists
-          "user-read-playback-position", "user-top-read", "user-read-recently-played",  # listening history
-          "user-library-modify", "user-library-read",  # library
-          ]
+SCOPES = [
+    # Spotify Connect
+    "user-read-currently-playing",
+    "user-read-playback-state",
+    "user-modify-playback-state",  # Required for playback control (play, pause, skip)
+    # Playback
+    "app-remote-control",
+    "streaming",
+    # Playlists
+    "playlist-read-private",
+    "playlist-read-collaborative",
+    "playlist-modify-private",
+    "playlist-modify-public",
+    # Listening history
+    "user-read-playback-position",
+    "user-top-read",
+    "user-read-recently-played",
+    # Library
+    "user-library-modify",
+    "user-library-read",
+]
 
 
 class Client:
@@ -35,7 +49,7 @@ class Client:
         """Initialize Spotify client with necessary permissions"""
         self.logger = logger
 
-        scope = "user-library-read,user-library-modify,user-read-playback-state,user-modify-playback-state,user-read-currently-playing,playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public"
+        scope = ",".join(SCOPES)
 
         try:
             # Use remote cache handler if backend URL is configured, otherwise use local file cache
