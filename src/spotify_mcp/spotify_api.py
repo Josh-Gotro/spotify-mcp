@@ -21,13 +21,27 @@ BACKEND_URL = os.getenv("SPOTIFY_BACKEND_URL")
 if REDIRECT_URI:
     REDIRECT_URI = utils.normalize_redirect_uri(REDIRECT_URI)
 
-SCOPES = ["user-read-currently-playing", "user-read-playback-state", "user-read-currently-playing",  # spotify connect
-          "app-remote-control", "streaming",  # playback
-          "playlist-read-private", "playlist-read-collaborative", "playlist-modify-private", "playlist-modify-public",
-          # playlists
-          "user-read-playback-position", "user-top-read", "user-read-recently-played",  # listening history
-          "user-library-modify", "user-library-read",  # library
-          ]
+SCOPES = [
+    # Spotify Connect
+    "user-read-currently-playing",
+    "user-read-playback-state",
+    "user-modify-playback-state",  # Required for playback control (play, pause, skip)
+    # Playback
+    "app-remote-control",
+    "streaming",
+    # Playlists
+    "playlist-read-private",
+    "playlist-read-collaborative",
+    "playlist-modify-private",
+    "playlist-modify-public",
+    # Listening history
+    "user-read-playback-position",
+    "user-top-read",
+    "user-read-recently-played",
+    # Library
+    "user-library-modify",
+    "user-library-read",
+]
 
 
 class Client:
@@ -232,7 +246,7 @@ class Client:
         if not playlists:
             raise ValueError("No playlists found.")
         return [utils.parse_playlist(playlist, self.username) for playlist in playlists['items']]
-    
+
     @utils.ensure_username
     def get_playlist_tracks(self, playlist_id: str, limit=50) -> List[Dict]:
         """
@@ -244,7 +258,7 @@ class Client:
         if not playlist:
             raise ValueError("No playlist found.")
         return utils.parse_tracks(playlist['tracks']['items'])
-    
+
     @utils.ensure_username
     def add_tracks_to_playlist(self, playlist_id: str, track_ids: List[str], position: Optional[int] = None):
         """
@@ -257,7 +271,7 @@ class Client:
             raise ValueError("No playlist ID provided.")
         if not track_ids:
             raise ValueError("No track IDs provided.")
-        
+
         try:
             response = self.sp.playlist_add_items(playlist_id, track_ids, position=position)
             self.logger.info(f"Response from adding tracks: {track_ids} to playlist {playlist_id}: {response}")
@@ -275,7 +289,7 @@ class Client:
             raise ValueError("No playlist ID provided.")
         if not track_ids:
             raise ValueError("No track IDs provided.")
-        
+
         try:
             response = self.sp.playlist_remove_all_occurrences_of_items(playlist_id, track_ids)
             self.logger.info(f"Response from removing tracks: {track_ids} from playlist {playlist_id}: {response}")
@@ -292,11 +306,11 @@ class Client:
         """
         if not name:
             raise ValueError("Playlist name is required.")
-        
+
         try:
             user = self.sp.current_user()
             user_id = user['id']
-            
+
             playlist = self.sp.user_playlist_create(
                 user=user_id,
                 name=name,
@@ -320,13 +334,13 @@ class Client:
         """
         if not playlist_id:
             raise ValueError("No playlist ID provided.")
-        
+
         try:
             response = self.sp.playlist_change_details(playlist_id, name=name, description=description)
             self.logger.info(f"Response from changing playlist details: {response}")
         except Exception as e:
             self.logger.error(f"Error changing playlist details: {str(e)}")
-       
+
     def get_devices(self) -> dict:
         return self.sp.devices()['devices']
 
@@ -349,7 +363,7 @@ class Client:
             if token is None:
                 self.logger.info("Auth check result: no token exists")
                 return False
-                
+
             is_expired = self.auth_manager.is_token_expired(token)
             self.logger.info(f"Auth check result: {'valid' if not is_expired else 'expired'}")
             return not is_expired  # Return True if token is NOT expired
